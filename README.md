@@ -44,7 +44,7 @@ That's reflected directly in the architecture:
 | Data freshness | Real-time, current state | Historical, refreshed periodically |
 | Example systems | PostgreSQL, MySQL | Snowflake, BigQuery, Redshift |
 
-In short: OLTP systems keep the business running right now; OLAP systems explain how the business got here — which is exactly what this pipeline is for.
+**In short: OLTP systems keep the business running right now; OLAP systems explain how the business got here — which is exactly what this pipeline is for.**
 
 ---
 
