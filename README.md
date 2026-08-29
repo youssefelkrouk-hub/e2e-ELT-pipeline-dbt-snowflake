@@ -1,7 +1,7 @@
 
 # 🚀 Modern Data Engineering Project with Snowflake, dbt, Airflow, Power BI & Docker
 
-![Dashboard Preview](Img/Pipeline.png)
+![Dashboard Preview](img/Pipeline.png)
 
 ## 📌 Overview
 
@@ -155,13 +155,7 @@ docker-compose build
 docker-compose up
 ```
 
-### Environment Variables (`.env`)
 
-```env
-POSTGRES_USER=airflow
-POSTGRES_PASSWORD=airflow
-POSTGRES_DB=airflow
-```
 
 ---
 
