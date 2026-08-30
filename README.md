@@ -234,7 +234,7 @@ This confirms the DAG reliably runs the dbt transformation (`dbt_run`) followed 
 
 ## 🗄️ Snowflake Database Explorer
 
-![Snowflake Database Explorer](img/snowflake_dwh.png)
+![Snowflake Database Explorer](img/Snowflake_dwh.png)
 
 The screenshot above shows the `FINANCE_DB.RAW` schema in Snowflake's Database Explorer, which reflects exactly the layered structure described above:
 
