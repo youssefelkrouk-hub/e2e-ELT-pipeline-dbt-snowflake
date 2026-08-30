@@ -100,6 +100,36 @@ That's reflected directly in the architecture:
 4. Define sources and create **staging models** using dbt under `models/staging`.
 5. Create **marts models** (facts and dimensions) under `models/marts`.
 
+### Why load into a Stage first, instead of loading CSVs straight into a table?
+
+A **stage** in Snowflake is not a table — it's an intermediate storage location (internal, in this case `sales_stage`) that sits *inside* Snowflake's cloud storage but *outside* any structured table. The CSV files land there first, untouched, before any table even needs to exist with the right schema. This two-step pattern (`stage → table`) exists for concrete reasons:
+
+- **Decouples file arrival from schema definition** — the files can be uploaded (via `PUT` or the UI) before the target table structure is finalized, tested, or even created. This avoids having to redesign the ingestion process every time a table's column types change.
+- **Native, bulk-optimized file handling** — an internal stage is Snowflake's designed entry point for bulk file loading. It supports compressed formats, file format objects (CSV, JSON, Parquet, etc.), and parallelized loading, none of which a plain table provides.
+- **Validation before commitment** — from a stage, you can run `LIST @sales_stage`, `SELECT` directly against staged files, or `COPY INTO ... VALIDATION_MODE` to preview/validate rows *before* they're written into a real table — catching malformed rows, encoding issues, or schema mismatches early.
+- **Safe re-loading / re-processing** — if a load fails or the raw table needs to be rebuilt, the original files are still sitting in the stage and can be reloaded without asking the source system to resend them.
+- **Separation of concerns** — the stage is purely about "getting the file into Snowflake's ecosystem"; the table is about "the file's data in a structured, queryable form." Mixing those two steps together makes debugging load issues (file-level vs. data-level) much harder.
+
+### Why `COPY INTO` from Stage → Raw table?
+
+Once the CSVs are sitting in `sales_stage`, `COPY INTO` is what actually **parses and loads** that raw file data into structured Snowflake tables (`RAW.CUSTOMERS`, `RAW.ORDERS`, `RAW.ORDER_ITEMS`, `RAW.PRODUCTS` — visible under `FINANCE_DB.RAW.Tables` in the Database Explorer). This step matters because:
+
+- **Turns files into queryable rows** — a CSV sitting in a stage is just a file; Snowflake can't run SQL aggregations, joins, or filters against it efficiently at scale. `COPY INTO` converts it into an actual columnar table that SQL (and therefore dbt) can query normally.
+- **Bulk, set-based loading** — `COPY INTO` loads the entire file (or many files) in one bulk operation rather than row-by-row inserts, which is dramatically faster and cheaper on Snowflake's compute for the batch volumes this pipeline deals with.
+- **Load metadata & idempotency** — Snowflake tracks which staged files have already been copied into a given table (via load history), so re-running `COPY INTO` on the same stage won't accidentally duplicate rows that were already loaded — important since Airflow may re-trigger the pipeline.
+- **A stable, structured entry point (`RAW` schema)** — the `RAW` tables become the single, immutable "landing zone" everything downstream depends on. dbt never touches the CSVs or the stage directly — it only ever needs to know about `RAW.ORDERS`, `RAW.CUSTOMERS`, etc. This keeps the ingestion layer and the transformation layer cleanly separated.
+
+### Why does dbt need this raw layer to exist first?
+
+dbt is a **transformation** tool, not a loading tool — it doesn't ingest files, it only runs SQL (`SELECT`) against tables/views that already exist in the warehouse. That's exactly why the `stage → COPY INTO → RAW` steps have to happen *before* dbt runs:
+
+- **dbt sources = the raw tables** — in `dbt/models/staging`, each `stg_*.sql` model is built with a `source()` reference pointing at `RAW.CUSTOMERS`, `RAW.ORDERS`, etc. Without those tables existing (and populated) in Snowflake, dbt has nothing to `SELECT FROM`.
+- **Clear separation of ingestion vs. transformation** — ingestion (stage + `COPY INTO`) is Snowflake/Airflow's job; cleaning, standardizing, and modeling that data (staging + marts) is dbt's job. Keeping these responsibilities apart makes each layer independently testable, debuggable, and re-runnable.
+- **Enables dbt's dependency graph (DAG)** — because `RAW` tables are the fixed starting point, dbt can build a clean lineage: `RAW → staging (stg_*) → marts (facts/dims)`. Each layer only ever builds on top of the previous one, which is what makes `dbt test` and `dbt docs generate` (lineage graphs) meaningful.
+- **Consistency for repeated runs** — since Airflow triggers `dbt_run` and `dbt_test` on a schedule, having a stable, already-loaded `RAW` layer means every dbt run starts from the same known state, instead of dbt having to worry about whether new files have arrived or been parsed correctly.
+
+**In short: Stage → `COPY INTO` → Raw is the ingestion path that turns arbitrary CSV files into stable, structured Snowflake tables — and dbt is deliberately kept out of that process so it can focus purely on transforming already-reliable raw data into analysis-ready marts.**
+
 ### Why Snowflake?
 
 Snowflake was chosen as the warehouse layer for this project for a few concrete reasons:
@@ -199,6 +229,20 @@ Key details from this run history:
 - **Airflow version**: 2.5.1
 
 This confirms the DAG reliably runs the dbt transformation (`dbt_run`) followed by the dbt data quality tests (`dbt_test`) defined in `tests/snowflake_test.yml`, end-to-end, without failures.
+
+---
+
+## 🗄️ Snowflake Database Explorer
+
+![Snowflake Database Explorer](img/snowflake_dwh.png)
+
+The screenshot above shows the `FINANCE_DB.RAW` schema in Snowflake's Database Explorer, which reflects exactly the layered structure described above:
+
+- **8 Tables** — `COUNTRIES_QUANTITIES`, `CUSTOMERS`, `CUSTOMER_SEGMENTATION`, `DAILY_ORDER_REVENUE`, `ORDERS`, `ORDER_ITEMS`, `PRODUCTS`, `STATUS_ORDER_COUNT`. This mixes the raw landing tables (`CUSTOMERS`, `ORDERS`, `ORDER_ITEMS`, `PRODUCTS`, loaded via `COPY INTO`) with the materialized dbt mart tables (`COUNTRIES_QUANTITIES`, `CUSTOMER_SEGMENTATION`, `DAILY_ORDER_REVENUE`, `STATUS_ORDER_COUNT`).
+- **4 Views** — `STG_CUSTOMERS`, `STG_ORDERS`, `STG_ORDER_ITEMS`, `STG_PRODUCTS`. These are the dbt **staging models**, materialized as views rather than tables since they're lightweight cleaning layers meant to be queried on the fly, not physically duplicated.
+- **1 Stage** — `SALES_STAGE`, the internal stage where the raw CSV files land before being copied into the raw tables.
+
+Seeing raw tables, staging views, and mart tables side by side in the same schema is a direct illustration of the `stage → raw → staging → marts` flow: the stage is the file drop-off point, the raw tables are the immutable landing zone, the staging views are the cleaned/standardized layer, and the mart tables are the final, BI-ready output.
 
 ---
 
