@@ -234,7 +234,7 @@ This confirms the DAG reliably runs the dbt transformation (`dbt_run`) followed 
 
 ## 🗄️ Snowflake Database Explorer
 
-![Snowflake Database Explorer](img/snowflake_dwh.png)
+![Snowflake Database Explorer](img/Snowflake_dwh.png)
 
 The screenshot above shows the `FINANCE_DB.RAW` schema in Snowflake's Database Explorer, which reflects exactly the layered structure described above:
 
@@ -248,7 +248,7 @@ Seeing raw tables, staging views, and mart tables side by side in the same schem
 
 ## 🔁 Data Engineering Lifecycle
 
-![Data Engineering Lifecycle](img/DataEngLifeCycle.png)
+![Data Engineering Lifecycle](img/DataEngLifeCycle.jfif)
 
 This diagram maps the general **Data Engineering Lifecycle** (Generation → Ingestion → Transformation → Serving, with Storage running underneath, feeding into Analytics / Machine Learning / Reverse ETL, all supported by cross-cutting *undercurrents*) directly onto this project:
 
