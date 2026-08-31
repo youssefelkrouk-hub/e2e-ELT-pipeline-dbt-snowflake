@@ -234,7 +234,7 @@ This confirms the DAG reliably runs the dbt transformation (`dbt_run`) followed 
 
 ## 🗄️ Snowflake Database Explorer
 
-![Snowflake Database Explorer](img/Snowflake_dwh.png)
+![Snowflake Database Explorer](img/snowflake_dwh.png)
 
 The screenshot above shows the `FINANCE_DB.RAW` schema in Snowflake's Database Explorer, which reflects exactly the layered structure described above:
 
@@ -243,6 +243,36 @@ The screenshot above shows the `FINANCE_DB.RAW` schema in Snowflake's Database E
 - **1 Stage** — `SALES_STAGE`, the internal stage where the raw CSV files land before being copied into the raw tables.
 
 Seeing raw tables, staging views, and mart tables side by side in the same schema is a direct illustration of the `stage → raw → staging → marts` flow: the stage is the file drop-off point, the raw tables are the immutable landing zone, the staging views are the cleaned/standardized layer, and the mart tables are the final, BI-ready output.
+
+---
+
+## 🔁 Data Engineering Lifecycle
+
+![Data Engineering Lifecycle](img/DataEngLifeCycle.png)
+
+This diagram maps the general **Data Engineering Lifecycle** (Generation → Ingestion → Transformation → Serving, with Storage running underneath, feeding into Analytics / Machine Learning / Reverse ETL, all supported by cross-cutting *undercurrents*) directly onto this project:
+
+| Stage | In this project |
+|---|---|
+| **Generation** | The 4 source CSVs — `orders.csv`, `order_items.csv`, `products.csv`, `customers.csv` |
+| **Ingestion** | Upload to the Snowflake stage `sales_stage`, then `COPY INTO` the `RAW` tables |
+| **Storage** | Snowflake (columnar, storage/compute separated) — holds `RAW` tables, `staging` views, and `marts` tables |
+| **Transformation** | dbt staging models (cleaning) + dbt mart models (business logic) |
+| **Serving** | Power BI, connected directly to the Snowflake marts |
+| **Analytics** | Power BI dashboards — revenue trends, customer segments, order status distribution |
+| **Machine Learning** | Not yet implemented — a natural next step would be customer scoring/clustering on top of `Customer_Segmentation` |
+| **Reverse ETL** | Not yet implemented — e.g. pushing computed customer segments back into a CRM/marketing tool |
+
+**Undercurrents** — the cross-cutting concerns that run through every stage above:
+
+| Undercurrent | In this project |
+|---|---|
+| **Security** | Snowflake RBAC, credentials managed via `profiles.yml` |
+| **Data management** | dbt tests (`snowflake_test.yml`) — unique `customer_id`, valid `order_status` values |
+| **DataOps** | Airflow orchestrates `dbt_run` + `dbt_test` automatically, monitored via Flower |
+| **Data architecture** | The `stage → raw → staging → marts` design, star-schema-style mart tables |
+| **Orchestration** | Airflow DAG (`dbt_snowflake_pipeline`) running on `CeleryExecutor` with distributed workers |
+| **Software engineering** | Versioned dbt SQL, Dockerized environment, Git-managed repo |
 
 ---
 
