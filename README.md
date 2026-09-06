@@ -48,6 +48,24 @@ That's reflected directly in the architecture:
 
 ---
 
+## 🏗️ Data Warehouse Layered Architecture
+
+![Data Warehouse Architecture: Sources -> Bronze/Silver/Gold layers -> Consume](img/DWH.png)
+
+This diagram shows the general **medallion-style layered architecture** that this project's Snowflake schema follows — sources land as raw data, get progressively cleaned and standardized, and finally become business-ready tables that downstream tools consume:
+
+| Layer | Generic name | In this project | Object type | Load | Transformations | Data model |
+|---|---|---|---|---|---|---|
+| **Sources** | CRM / ERP / CSV files | The 4 source CSVs (`orders.csv`, `order_items.csv`, `products.csv`, `customers.csv`), landing in the `sales_stage` internal stage | Files in folders | — | None | None |
+| **Bronze** | Raw Data | `RAW.CUSTOMERS`, `RAW.ORDERS`, `RAW.ORDER_ITEMS`, `RAW.PRODUCTS` — loaded via `COPY INTO` | Tables | Batch processing, full load, truncate & insert | None — loaded as-is | None (as-is) |
+| **Silver** | Cleaned, Standardized Data | dbt **staging models** (`stg_customers`, `stg_orders`, `stg_order_items`, `stg_products`), materialized as views | Views | Batch processing, full load, truncate & insert | Data cleansing, standardization, normalization, derived columns, enrichment | None (as-is), one row per source row |
+| **Gold** | Business-Ready Data | dbt **mart models** (`Daily_Order_Revenue`, `Customer_Segmentation`, `Countries_Quantities`, `Status_Order_Count`) | Tables | Batch processing, full load, truncate & insert | Data integration, aggregations, business logic | Star schema / flat & aggregated tables |
+| **Consume** | BI & Reporting, Ad-Hoc SQL, Machine Learning | Power BI dashboards connected directly to the Snowflake marts | — | — | — | — |
+
+The mapping isn't a perfect one-to-one with the generic Bronze/Silver/Gold naming used in the diagram, but conceptually it's the same pattern this project implements end to end: **Sources → Stage → Raw (Bronze) → Staging (Silver) → Marts (Gold) → Power BI (Consume)**. The Silver layer is where the transformation types shown in the diagram (cleansing, standardization, normalization, derived columns, enrichment) actually happen in dbt's `staging` models, while the Gold layer is where integration, aggregation, and business logic are applied in the `marts` models — exactly matching the `Daily_Order_Revenue`, `Customer_Segmentation`, `Countries_Quantities`, and `Status_Order_Count` tables described later in this README.
+
+---
+
 ## 🗂️ Project Structure
 
 ```
@@ -169,6 +187,24 @@ Mart models sit on top of the staging layer and contain the **business logic** �
 - **`profiles.yml`** — Stores the connection configuration dbt uses to connect to Snowflake (account, warehouse, database, schema, and credentials/role). This is what lets dbt actually run models against the right Snowflake environment.
 
 ---
+## 🗂️ dbt archi : 
+dbt/
+├── dbt_project.yml          # Core project configuration & materialization strategy
+├── profiles.yml             # Snowflake connection credentials & target environments
+├── models/
+│   ├── sources.yml          # Declares and documents raw source tables in Snowflake
+│   ├── staging/             # Layer 1: Data cleansing, casting, and renaming (Views)
+│   │   ├── stg_customers.sql
+│   │   ├── stg_orders.sql
+│   │   ├── stg_order_items.sql
+│   │   └── stg_products.sql
+│   └── marts/               # Layer 2: Business logic, facts & dimensions (Tables)
+│       ├── Countries_Quantities.sql
+│       ├── Customer_Segmentation.sql
+│       ├── Daily_Order_Revenue.sql
+│       └── Status_Order_Count.sql
+└── tests/
+    └── snowflake_test.yml   # Data quality assertions (uniqueness, accepted values)
 
 ## ✅ dbt Testing
 
