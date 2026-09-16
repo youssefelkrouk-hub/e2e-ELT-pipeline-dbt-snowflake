@@ -251,6 +251,53 @@ Access Airflow UI at: [http://localhost:8081](http://localhost:8081)
 
 ---
 
+## 🐳 Containers in Docker Desktop — What Each One Does
+
+![Docker Desktop — Container List for this project](img/Docker_Containers_ETL.png)
+
+When you run `docker-compose up`, Docker Desktop groups every container under the project stack (visible at the top of the list, e.g. `sales-data-pipe...`) and starts the services below. Here is what each one is responsible for in **this specific project**:
+
+| Container (as shown in Docker Desktop) | Image | Port(s) | Role in this project |
+|---|---|---|---|
+| **postgres-1** | `postgres:1x` | `5432:5432` | Airflow's **metadata database**. It stores Airflow's internal state — DAG definitions, task instances, run history, connections, users, variables. **Note:** this is *not* the data warehouse for this project — Snowflake plays that role. Postgres here only exists to make Airflow itself work. |
+| **redis-1** | `redis:latest` | `6379:6379` | The **Celery message broker**. Since this project uses `CeleryExecutor`, the scheduler doesn't hand tasks directly to workers — it pushes them into a queue in Redis, and idle workers pull tasks from that queue. It's the glue that makes distributed task execution possible. |
+| **airflow-init-1** | `airflow-dbt` (custom image) | — | A **one-off initialization job**, not a long-running service. It runs `airflow db init`/`migrate`, creates the default admin user, and sets required permissions the first time the stack is started. This is exactly the `docker-compose up airflow-init` step mentioned above. Once it finishes successfully it exits (which is why it shows `0%` CPU / `0B` memory and no green "running" dot — it's done its job). |
+| **flower-1** | `airflow-dbt` (custom image) | `5555:5555` | The **Celery monitoring UI**. Open `http://localhost:5555` to see live worker status, active/queued/completed tasks, and queue health for the Celery cluster behind Airflow. Purely observability — it doesn't run any pipeline logic itself. |
+| **airflow-scheduler** | `airflow-dbt` (custom image) | — | The **orchestration brain**. It continuously parses the DAG file (`dags/dbt_dag.py`), evaluates schedules/dependencies, and decides when the `dbt_snowflake_pipeline` DAG (and its `dbt_run` → `dbt_test` → `End` tasks) should run. When a task is ready, it publishes it to the Redis queue. |
+| **airflow-1** (webserver) | `airflow-dbt` (custom image) | `8081:8080` | The **Airflow UI**, reachable at `http://localhost:8081`. This is where you trigger DAG runs manually, watch the Grid/Graph view of `dbt_snowflake_pipeline`, inspect task logs, and manage connections/variables (e.g. the Snowflake connection dbt uses). |
+| **airflow-worker-1** | `airflow-dbt` (custom image) | — | The container that **actually executes the tasks**. It pulls jobs from the Redis queue and runs them — in this project, that means executing `dbt run` and `dbt test` inside the container (dbt commands run from `/opt/airflow/dbt`), which is what pushes transformed data into the Snowflake marts. |
+
+### How they work together (end-to-end flow)
+
+```
+airflow-scheduler (reads dbt_dag.py)
+        │
+        ▼
+   Redis (task queue)  ◄── flower-1 (monitors this queue)
+        │
+        ▼
+airflow-worker-1  ──► executes `dbt run` / `dbt test` ──► Snowflake (RAW → staging → marts)
+        │
+        ▼
+airflow-1 (webserver) ◄── reads status/logs from ──► postgres-1 (Airflow metadata)
+```
+
+- `airflow-init-1` only runs once, before this cycle even starts, to set up `postgres-1` with the tables Airflow needs.
+- `postgres-1` and `redis-1` are pure **infrastructure** containers — they don't know anything about dbt or Snowflake; they just keep Airflow's internal machinery running.
+- `airflow-scheduler`, `airflow-1` (webserver), and `airflow-worker-1` are three different **roles played by the same custom `airflow-dbt` image** — each container starts the same image with a different command (`webserver`, `scheduler`, `celery worker`), which is why they share an image name in Docker Desktop but appear as separate containers with separate responsibilities.
+- The actual Snowflake data warehouse and Power BI dashboards are **outside** this Docker stack entirely — Docker only runs the orchestration layer (Airflow + dbt), while Snowflake stores the data and Power BI reads from Snowflake directly.
+
+### Quick recap — infrastructure vs. orchestration containers
+
+| Category | Containers | Purpose |
+|---|---|---|
+| **Airflow infrastructure** | `postgres-1`, `redis-1` | Keep Airflow's internal state and task queue running |
+| **Airflow orchestration roles** | `airflow-scheduler`, `airflow-1` (webserver), `airflow-worker-1` | Schedule, expose the UI for, and execute the `dbt_snowflake_pipeline` DAG |
+| **One-off setup job** | `airflow-init-1` | Initializes the Airflow metadata DB on first run, then exits |
+| **Monitoring** | `flower-1` | Visualizes Celery worker/task/queue health |
+
+---
+
 ## 📈 Airflow DAG Execution
 
 ![Airflow DAG Grid View](img/Airflow.png)
