@@ -253,7 +253,7 @@ Access Airflow UI at: [http://localhost:8081](http://localhost:8081)
 
 ## 🐳 Containers in Docker Desktop — What Each One Does
 
-![Docker Desktop — Container List for this project](img/Docker_Containers_ETL.png)
+![Docker Desktop — Container List for this project](img/docker_desktop_running.png)
 
 When you run `docker-compose up`, Docker Desktop groups every container under the project stack (visible at the top of the list, e.g. `sales-data-pipe...`) and starts the services below. Here is what each one is responsible for in **this specific project**:
 
@@ -395,5 +395,5 @@ docker-compose up
 ## ✨ Future Improvements
 
 - Add data quality checks using **Great Expectations**.
-- Trigger data load via file arrival or API.
+- Trigger data load via file arrival or API Instead of csv files.
 - CI/CD integration with **GitHub Actions** or **Jenkins**.
