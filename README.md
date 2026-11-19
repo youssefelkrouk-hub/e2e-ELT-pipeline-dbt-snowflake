@@ -255,17 +255,17 @@ Access Airflow UI at: [http://localhost:8081](http://localhost:8081)
 
 ![Docker Desktop — Container List for this project](img/docker_desktop_running.png)
 
-When you run `docker-compose up`, Docker Desktop groups every container under the project stack (visible at the top of the list, e.g. `sales-data-pipe...`) and starts the services below. Here is what each one is responsible for in **this specific project**:
+When you run `docker-compose up`, Docker Desktop groups every container under the project stack (visible at the top of the list: `e2e-elt-project`) and starts the services below. Here is what each one is responsible for in **this specific project**:
 
 | Container (as shown in Docker Desktop) | Image | Port(s) | Role in this project |
 |---|---|---|---|
-| **postgres-1** | `postgres:1x` | `5432:5432` | Airflow's **metadata database**. It stores Airflow's internal state — DAG definitions, task instances, run history, connections, users, variables. **Note:** this is *not* the data warehouse for this project — Snowflake plays that role. Postgres here only exists to make Airflow itself work. |
-| **redis-1** | `redis:latest` | `6379:6379` | The **Celery message broker**. Since this project uses `CeleryExecutor`, the scheduler doesn't hand tasks directly to workers — it pushes them into a queue in Redis, and idle workers pull tasks from that queue. It's the glue that makes distributed task execution possible. |
-| **airflow-init-1** | `airflow-dbt` (custom image) | — | A **one-off initialization job**, not a long-running service. It runs `airflow db init`/`migrate`, creates the default admin user, and sets required permissions the first time the stack is started. This is exactly the `docker-compose up airflow-init` step mentioned above. Once it finishes successfully it exits (which is why it shows `0%` CPU / `0B` memory and no green "running" dot — it's done its job). |
-| **flower-1** | `airflow-dbt` (custom image) | `5555:5555` | The **Celery monitoring UI**. Open `http://localhost:5555` to see live worker status, active/queued/completed tasks, and queue health for the Celery cluster behind Airflow. Purely observability — it doesn't run any pipeline logic itself. |
-| **airflow-scheduler** | `airflow-dbt` (custom image) | — | The **orchestration brain**. It continuously parses the DAG file (`dags/dbt_dag.py`), evaluates schedules/dependencies, and decides when the `dbt_snowflake_pipeline` DAG (and its `dbt_run` → `dbt_test` → `End` tasks) should run. When a task is ready, it publishes it to the Redis queue. |
-| **airflow-1** (webserver) | `airflow-dbt` (custom image) | `8081:8080` | The **Airflow UI**, reachable at `http://localhost:8081`. This is where you trigger DAG runs manually, watch the Grid/Graph view of `dbt_snowflake_pipeline`, inspect task logs, and manage connections/variables (e.g. the Snowflake connection dbt uses). |
-| **airflow-worker-1** | `airflow-dbt` (custom image) | — | The container that **actually executes the tasks**. It pulls jobs from the Redis queue and runs them — in this project, that means executing `dbt run` and `dbt test` inside the container (dbt commands run from `/opt/airflow/dbt`), which is what pushes transformed data into the Snowflake marts. |
+| **postgres-1** | `postgres:13` | `5432:5432` | Airflow's **metadata database**. It stores Airflow's internal state — DAG definitions, task instances, run history, connections, users, variables. **Note:** this is *not* the data warehouse for this project — Snowflake plays that role. Postgres here only exists to make Airflow itself work. |
+| **redis-1** | `redis:latest` | `6379:6379` | The **Celery message broker**. Since this project uses `CeleryExecutor`, the scheduler doesn't hand tasks directly to workers — it pushes them into a queue in Redis, and idle workers pull tasks from that queue. |
+| **airflow-init-1** | `airflow-dbt` (custom image) | — | A **one-off initialization job**, not a long-running service. It runs `airflow db init`/`migrate`, creates the default admin user, and sets required permissions the first time the stack is started. Once it finishes successfully it exits (which is why it shows `0%` CPU and no green "running" dot — it's done its job). |
+| **airflow-scheduler** | `airflow-dbt` (custom image) | — | The **orchestration brain**. It continuously parses the DAG file (`dags/dbt_dag.py`), evaluates schedules/dependencies, and decides when the `dbt_snowflake_pipeline` DAG (`dbt_run` → `dbt_test` → `End`) should run. When a task is ready, it publishes it to the Redis queue. |
+| **airflow-1** (webserver) | `airflow-dbt` (custom image) | `8081:8080` | The **Airflow UI**, reachable at `http://localhost:8081`. This is where you trigger DAG runs manually, watch the Grid/Graph view, inspect task logs, and manage connections/variables (e.g. the Snowflake connection used by dbt). |
+| **airflow-worker-1** | `airflow-dbt` (custom image) | — | The container that **actually executes the tasks**. It pulls jobs from the Redis queue and runs `dbt run` and `dbt test` inside the container (from `/opt/airflow/dbt`), which pushes the transformed data into the Snowflake marts. |
+| **streamlit_dashboard** | `streamlit-sal...` (custom image) | `8501:8501` | The **data visualization layer**. It runs the Streamlit app that connects to Snowflake and displays the transformed marts as an interactive dashboard, reachable at `http://localhost:8501`. It doesn't take part in the orchestration — it only *reads* the final results produced by the pipeline. |
 
 ### How they work together (end-to-end flow)
 
@@ -273,28 +273,30 @@ When you run `docker-compose up`, Docker Desktop groups every container under th
 airflow-scheduler (reads dbt_dag.py)
         │
         ▼
-   Redis (task queue)  ◄── flower-1 (monitors this queue)
+   Redis (task queue)
         │
         ▼
 airflow-worker-1  ──► executes `dbt run` / `dbt test` ──► Snowflake (RAW → staging → marts)
-        │
-        ▼
-airflow-1 (webserver) ◄── reads status/logs from ──► postgres-1 (Airflow metadata)
+        │                                                        │
+        ▼                                                        ▼
+airflow-1 (webserver) ◄── reads status/logs ──► postgres-1   streamlit_dashboard (reads marts)
+                                                 (Airflow metadata)
 ```
 
 - `airflow-init-1` only runs once, before this cycle even starts, to set up `postgres-1` with the tables Airflow needs.
 - `postgres-1` and `redis-1` are pure **infrastructure** containers — they don't know anything about dbt or Snowflake; they just keep Airflow's internal machinery running.
-- `airflow-scheduler`, `airflow-1` (webserver), and `airflow-worker-1` are three different **roles played by the same custom `airflow-dbt` image** — each container starts the same image with a different command (`webserver`, `scheduler`, `celery worker`), which is why they share an image name in Docker Desktop but appear as separate containers with separate responsibilities.
-- The actual Snowflake data warehouse and Power BI dashboards are **outside** this Docker stack entirely — Docker only runs the orchestration layer (Airflow + dbt), while Snowflake stores the data and Power BI reads from Snowflake directly.
+- `airflow-scheduler`, `airflow-1` (webserver), and `airflow-worker-1` are three different **roles played by the same custom `airflow-dbt` image** — each container starts the same image with a different command (`webserver`, `scheduler`, `celery worker`), which is why they share an image name in Docker Desktop but appear as separate containers.
+- `streamlit_dashboard` is the **consumption layer**: once dbt has built the marts in Snowflake, Streamlit queries them and presents the results to end users.
+- The Snowflake data warehouse itself is **outside** this Docker stack — Docker runs the orchestration layer (Airflow + dbt) and the dashboard, while Snowflake stores the data.
 
-### Quick recap — infrastructure vs. orchestration containers
+### Quick recap — containers by category
 
 | Category | Containers | Purpose |
 |---|---|---|
 | **Airflow infrastructure** | `postgres-1`, `redis-1` | Keep Airflow's internal state and task queue running |
 | **Airflow orchestration roles** | `airflow-scheduler`, `airflow-1` (webserver), `airflow-worker-1` | Schedule, expose the UI for, and execute the `dbt_snowflake_pipeline` DAG |
 | **One-off setup job** | `airflow-init-1` | Initializes the Airflow metadata DB on first run, then exits |
-| **Monitoring** | `flower-1` | Visualizes Celery worker/task/queue health |
+| **Visualization** | `streamlit_dashboard` | Interactive dashboard on top of the Snowflake marts |
 
 ---
 
@@ -382,7 +384,82 @@ docker-compose build
 docker-compose up
 ```
 
+
+
 ---
+
+## 🚀 Streamlit Dashboard (complement to Power BI)
+
+An interactive **Streamlit** app runs as an extra container (`streamlit_dashboard`, port `8501`) and reads the dbt marts directly from Snowflake, as a lightweight, self-hosted alternative to Power BI.
+
+![Streamlit — Home](screenshots/ui_accueil.png)
+![Streamlit — Revenue](screenshots/chiffre_d'affaires.png)
+![Streamlit — Revenue](screenshots/quantité_commandes_mondiale.png)
+![Streamlit — Revenue](screenshots/segmentation_RFM.png)
+![Streamlit — Revenue](screenshots/status_commandes.png)
+
+### Pages
+
+| Page | Content |
+|---|---|
+| 🏠 **Home** | Pipeline overview and 6 KPI cards (total revenue, orders, countries, customers, best day, last data date) |
+| 📂 **CSV Exploration** | Preview, data types, missing values, duplicates, auto charts, referential integrity, CSV export |
+| 📈 **Sales Analysis** | Revenue time series (7-day moving average), order status, country choropleth map, RFM segmentation |
+| 🔍 **Quality & Pipeline** | Raw vs marts row counts, freshness, null rates, Airflow DAG status |
+
+### Project structure
+
+```
+streamlit_app/
+├── app.py                 # Main entry point
+├── pages/                 # 1_Accueil, 2_CSV, 3_Ventes, 4_Qualite
+├── utils/
+│   ├── config.py          # Central config (table names, env vars)
+│   ├── db.py              # Snowflake connection + cached queries
+│   └── charts.py          # Reusable Plotly Express charts
+├── .streamlit/            # Theme + secrets example (do not commit)
+├── Dockerfile             # Python 3.11-slim, non-root, healthcheck
+└── requirements.txt       # Pinned dependencies
+```
+
+### Quick start
+
+1. Add the Snowflake variables to the root `.env` (including the new `SNOWFLAKE_MARTS_SCHEMA=MARTS`).
+2. Start the app:
+
+```bash
+docker compose up -d streamlit    # Streamlit only
+docker compose up -d              # full stack
+```
+
+3. Open [http://localhost:8501](http://localhost:8501).
+
+### Configuration
+
+- **Mart table names** are all defined in one place: `streamlit_app/utils/config.py`.
+- **Airflow status** (optional): set `AIRFLOW_URL`, `AIRFLOW_USER`, `AIRFLOW_PASSWORD` and `AIRFLOW_DAG_ID=dbt_snowflake_pipeline` in `.env`.
+- **New page**: add `pages/5_MyPage.py`, then run `docker compose restart streamlit`.
+
+### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| App shows "demo mode" (local CSVs) | Snowflake is unreachable → check `docker compose exec streamlit env \| grep SNOWFLAKE` and `docker compose logs streamlit --tail=50` |
+| Missing Snowflake variables error | Make sure `.env` has `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD` |
+| Port 8501 already in use | Change the mapping in `docker-compose.yml` to `"8502:8501"` |
+| Code changed | `docker compose build streamlit && docker compose up -d streamlit` |
+| Stale data | Streamlit menu **⋮ → Clear cache** |
+
+### Security
+
+- Never commit `.env` or `.streamlit/secrets.toml` (add them to `.gitignore`).
+- CSV volume is mounted read-only (`:ro`) and the container runs as a non-root user (`appuser`).
+
+### Dependencies
+
+`streamlit 1.41.1` · `pandas 2.2.3` · `plotly 5.24.1` · `snowflake-connector-python[pandas] 3.12.4` · `python-dotenv 1.0.1` · `requests 2.32.3`
+---
+
 
 ## 📎 Notes
 
@@ -390,10 +467,3 @@ docker-compose up
 - All dbt commands are run inside the Airflow container at path `/opt/airflow/dbt`.
 - Data lineage and model dependencies are managed by dbt.
 
----
-
-## ✨ Future Improvements
-
-- Add data quality checks using **Great Expectations**.
-- Trigger data load via file arrival or API Instead of csv files.
-- CI/CD integration with **GitHub Actions** or **Jenkins**.
