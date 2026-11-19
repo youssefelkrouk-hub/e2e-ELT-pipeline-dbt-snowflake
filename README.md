@@ -361,19 +361,6 @@ This diagram maps the general **Data Engineering Lifecycle** (Generation → Ing
 
 ---
 
-## 📊 Power BI Integration
-
-After dbt models are materialized in Snowflake:
-
-1. Connect Power BI to Snowflake via native connector.
-2. Import tables/views like `daily_order_revenue`, `customer_segmentation`, etc.
-3. Build visual dashboards showing:
-   - Order revenue trends
-   - Customer segments
-   - Order status distributions
-   - Product quantities by country
-
----
 
 ## 🐳 Docker Setup
 
@@ -388,15 +375,15 @@ docker-compose up
 
 ---
 
-## 🚀 Streamlit Dashboard (complement to Power BI)
+## 🚀 Streamlit Dashboard 
 
 An interactive **Streamlit** app runs as an extra container (`streamlit_dashboard`, port `8501`) and reads the dbt marts directly from Snowflake, as a lightweight, self-hosted alternative to Power BI.
 
-![Streamlit — Home](screenshots/ui_accueil.png)
-![Streamlit — Revenue](screenshots/chiffre_d'affaires.png)
-![Streamlit — Revenue](screenshots/quantité_commandes_mondiale.png)
-![Streamlit — Revenue](screenshots/segmentation_RFM.png)
-![Streamlit — Revenue](screenshots/status_commandes.png)
+![Streamlit — Home](streamlit_app/screenshots/ui_accueil.png)
+![Streamlit — Revenue](streamlit_app/screenshots/chiffre_d'affaires.png)
+![Streamlit — Revenue](streamlit_app/screenshots/quantité_commandes_mondiale.png)
+![Streamlit — Revenue](streamlit_app/screenshots/segmentation_RFM.png)
+![Streamlit — Revenue](streamlit_app/screenshots/status_commandes.png)
 
 ### Pages
 
@@ -433,32 +420,6 @@ docker compose up -d              # full stack
 ```
 
 3. Open [http://localhost:8501](http://localhost:8501).
-
-### Configuration
-
-- **Mart table names** are all defined in one place: `streamlit_app/utils/config.py`.
-- **Airflow status** (optional): set `AIRFLOW_URL`, `AIRFLOW_USER`, `AIRFLOW_PASSWORD` and `AIRFLOW_DAG_ID=dbt_snowflake_pipeline` in `.env`.
-- **New page**: add `pages/5_MyPage.py`, then run `docker compose restart streamlit`.
-
-### Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| App shows "demo mode" (local CSVs) | Snowflake is unreachable → check `docker compose exec streamlit env \| grep SNOWFLAKE` and `docker compose logs streamlit --tail=50` |
-| Missing Snowflake variables error | Make sure `.env` has `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD` |
-| Port 8501 already in use | Change the mapping in `docker-compose.yml` to `"8502:8501"` |
-| Code changed | `docker compose build streamlit && docker compose up -d streamlit` |
-| Stale data | Streamlit menu **⋮ → Clear cache** |
-
-### Security
-
-- Never commit `.env` or `.streamlit/secrets.toml` (add them to `.gitignore`).
-- CSV volume is mounted read-only (`:ro`) and the container runs as a non-root user (`appuser`).
-
-### Dependencies
-
-`streamlit 1.41.1` · `pandas 2.2.3` · `plotly 5.24.1` · `snowflake-connector-python[pandas] 3.12.4` · `python-dotenv 1.0.1` · `requests 2.32.3`
----
 
 
 ## 📎 Notes
