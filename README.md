@@ -1,6 +1,6 @@
 # 🚀 Modern Data Engineering Project with Snowflake, dbt, Airflow, Power BI & Docker
 
-![Dashboard Preview](img/Pipeline.png)
+![Dashboard Preview](img/Pipline.png)
 
 ## 📌 Overview
 
