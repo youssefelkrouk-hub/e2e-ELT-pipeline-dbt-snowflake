@@ -11,6 +11,8 @@
 *Page d'accueil — navigation latérale avec les 4 pages : Accueil, CSV, Ventes, Qualité.*
 
 ---
+![Accueil — Sales Data Pipeline](screenshots/chiffre_d'affaires.png)
+
 
 ## 🏗️ Architecture complète
 
